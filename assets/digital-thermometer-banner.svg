@@ -42,12 +42,20 @@
 
   <g transform="translate(880 58)">
     <rect x="0" y="0" width="314" height="238" rx="22" fill="#07101e" stroke="#164e63" stroke-width="2"/>
-    <rect x="24" y="24" width="266" height="94" rx="12" fill="#061a27" stroke="#0e7490"/>
-    <text x="45" y="58" fill="#6092a8" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="3">TEMPERATURE</text>
-    <text x="43" y="91" fill="#67e8f9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="39" font-weight="700" filter="url(#softGlow)">26.1 °C</text>
-    <text x="45" y="109" fill="#5eead4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" letter-spacing="1">Q: HIGH   TREND: STABLE</text>
+    <rect x="24" y="24" width="266" height="112" rx="12" fill="#061a27" stroke="#0e7490"/>
+    <text x="45" y="48" fill="#6092a8" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="700" letter-spacing="3">TEMPERATURE</text>
+    <text x="43" y="80" fill="#67e8f9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="32" font-weight="700" filter="url(#softGlow)">26.1 °C</text>
+    <text x="45" y="98" fill="#5eead4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="700" letter-spacing="1">FORECAST 27.4 °C  ^H</text>
+    <g fill="#22d3ee" opacity="0.82">
+      <rect x="46" y="125" width="12" height="4" rx="1"/><rect x="62" y="124" width="12" height="5" rx="1"/>
+      <rect x="78" y="123" width="12" height="6" rx="1"/><rect x="94" y="121" width="12" height="8" rx="1"/>
+      <rect x="110" y="119" width="12" height="10" rx="1"/><rect x="126" y="117" width="12" height="12" rx="1"/>
+      <rect x="142" y="115" width="12" height="14" rx="1"/><rect x="158" y="113" width="12" height="16" rx="1"/>
+      <rect x="174" y="111" width="12" height="18" rx="1"/><rect x="190" y="109" width="12" height="20" rx="1"/>
+      <rect x="206" y="107" width="12" height="22" rx="1"/><rect x="222" y="105" width="12" height="24" rx="1"/>
+    </g>
 
-    <g transform="translate(20 151)" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700">
+    <g transform="translate(20 158)" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700">
       <rect width="50" height="34" rx="7" fill="#0c2535" stroke="#0e7490"/><text x="11" y="22" fill="#7dd3fc">LM35</text>
       <path d="M54 17H68" stroke="#22d3ee" stroke-width="2"/>
       <circle cx="61" cy="17" r="3" fill="#2dd4bf"><animate attributeName="cx" values="56;66;56" dur="1.8s" repeatCount="indefinite"/></circle>

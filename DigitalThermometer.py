@@ -1,12 +1,13 @@
-"""Reference model for the 8051 digital thermometer's smart measurement layer.
+"""Desktop reference model for the 8051 thermal-telemetry firmware.
 
-This module does not access 8051 hardware registers. It mirrors the filtering,
-conversion, quality grading, trend detection, and range checks used by the C
-firmware so the measurement logic can be exercised on a normal computer.
+The module mirrors the embedded trimmed-mean filter, calibration, measurement
+quality, trend detection, auto-ranging sparkline, least-squares forecast, and
+fault handling. It does not access 8051 hardware registers.
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable, Sequence
@@ -16,6 +17,11 @@ ADC_VREF_MV = 2560
 SAMPLE_COUNT = 16
 TREND_THRESHOLD_TENTHS_C = 10
 MAX_VALID_TENTHS_C = 1500
+SPARK_LENGTH = 16
+MIN_FORECAST_POINTS = 4
+FORECAST_HORIZON_WINDOWS = 15
+MAX_FORECAST_CHANGE_TENTHS_C = 200
+BLOCKS = "▁▂▃▄▅▆▇█"
 
 
 class Quality(str, Enum):
@@ -35,20 +41,25 @@ class Measurement:
     filtered_adc: int
     spread: int
     temperature_tenths_c: int
+    forecast_tenths_c: int
     quality: Quality
     trend: Trend
+    sparkline: str
     sensor_fault: bool
 
     @property
     def temperature_c(self) -> float:
         return self.temperature_tenths_c / 10
 
+    @property
+    def forecast_c(self) -> float:
+        return self.forecast_tenths_c / 10
+
 
 def trimmed_mean(samples: Sequence[int]) -> tuple[int, int]:
     """Return a rounded mean after rejecting one minimum and one maximum."""
     if len(samples) != SAMPLE_COUNT:
         raise ValueError(f"exactly {SAMPLE_COUNT} ADC samples are required")
-
     if any(sample < 0 or sample > 255 for sample in samples):
         raise ValueError("ADC samples must be in the range 0..255")
 
@@ -89,59 +100,147 @@ def classify_trend(current: int, previous: int | None) -> Trend:
     return Trend.STABLE
 
 
+def _truncate_division(numerator: int, denominator: int) -> int:
+    """Match C integer division, which truncates toward zero."""
+    if denominator <= 0:
+        raise ValueError("denominator must be positive")
+    if numerator >= 0:
+        return numerator // denominator
+    return -((-numerator) // denominator)
+
+
+def forecast_temperature(history: Sequence[int]) -> int:
+    """Project 15 windows ahead using a bounded least-squares trend."""
+    if not history:
+        return 0
+    if len(history) < MIN_FORECAST_POINTS:
+        return history[-1]
+
+    n = len(history)
+    sum_x = sum(range(n))
+    sum_y = sum(history)
+    sum_xy = sum(index * value for index, value in enumerate(history))
+    sum_x2 = sum(index * index for index in range(n))
+    numerator = n * sum_xy - sum_x * sum_y
+    denominator = n * sum_x2 - sum_x * sum_x
+
+    if denominator == 0:
+        return history[-1]
+
+    change = _truncate_division(
+        numerator * FORECAST_HORIZON_WINDOWS,
+        denominator,
+    )
+    change = max(
+        -MAX_FORECAST_CHANGE_TENTHS_C,
+        min(MAX_FORECAST_CHANGE_TENTHS_C, change),
+    )
+    return max(0, min(MAX_VALID_TENTHS_C, history[-1] + change))
+
+
+def render_sparkline(history: Sequence[int], width: int = SPARK_LENGTH) -> str:
+    """Return a right-aligned, auto-ranging Unicode thermal sparkline."""
+    visible = list(history[-width:])
+    if not visible:
+        return " " * width
+
+    minimum = min(visible)
+    maximum = max(visible)
+    span = maximum - minimum
+
+    if span == 0:
+        chart = BLOCKS[3] * len(visible)
+    else:
+        levels = [
+            ((value - minimum) * 7 + span // 2) // span
+            for value in visible
+        ]
+        chart = "".join(BLOCKS[level] for level in levels)
+
+    return chart.rjust(width)
+
+
 class SmartThermometer:
-    """Stateful reference implementation of the embedded measurement pipeline."""
+    """Stateful reference implementation of the thermal telemetry pipeline."""
 
     def __init__(self, vref_mv: int = ADC_VREF_MV) -> None:
         if vref_mv <= 0:
             raise ValueError("ADC reference voltage must be positive")
         self.vref_mv = vref_mv
         self._previous_temperature: int | None = None
+        self._history: deque[int] = deque(maxlen=SPARK_LENGTH)
 
     def process(self, samples: Iterable[int]) -> Measurement:
         sample_window = tuple(samples)
         filtered_adc, spread = trimmed_mean(sample_window)
         temperature = adc_to_tenths_c(filtered_adc, self.vref_mv)
         fault = temperature > MAX_VALID_TENTHS_C
-        trend = classify_trend(temperature, self._previous_temperature)
 
         if fault:
             self._previous_temperature = None
+            self._history.clear()
+            forecast = temperature
+            trend = Trend.STABLE
         else:
+            trend = classify_trend(temperature, self._previous_temperature)
+            self._history.append(temperature)
+            forecast = forecast_temperature(tuple(self._history))
             self._previous_temperature = temperature
 
         return Measurement(
             filtered_adc=filtered_adc,
             spread=spread,
             temperature_tenths_c=temperature,
+            forecast_tenths_c=forecast,
             quality=classify_quality(spread),
             trend=trend,
+            sparkline=render_sparkline(tuple(self._history)),
             sensor_fault=fault,
         )
 
 
 def lcd_preview(measurement: Measurement) -> str:
-    """Return a two-line text preview matching the 16x2 LCD presentation."""
+    """Return the exact two-line, 16-column dashboard layout."""
     if measurement.sensor_fault:
         return " SENSOR FAULT   \n CHECK LM35/ADC "
 
-    first = f"TEMP: {measurement.temperature_c:.1f}°C"
-    second = f"Q:{measurement.quality.value:<5}{measurement.trend.value}"
-    return f"{first[:16]:<16}\n{second[:16]:<16}"
+    trend_symbol = {
+        Trend.RISING: "^",
+        Trend.FALLING: "v",
+        Trend.STABLE: "=",
+    }[measurement.trend]
+    quality_symbol = {
+        Quality.HIGH: "H",
+        Quality.MEDIUM: "M",
+        Quality.LOW: "L",
+    }[measurement.quality]
+    first = (
+        f"{measurement.temperature_c:.1f}C>"
+        f"{measurement.forecast_c:.1f}C"
+        f"{trend_symbol}{quality_symbol}"
+    )
+    return f"{first[:16]:<16}\n{measurement.sparkline[:16]:<16}"
 
 
 def main() -> None:
     thermometer = SmartThermometer()
+    offsets = (0, 0, -1, 0, 1, 0, 0, -1, 0, 1, 0, 0, -1, 0, 1, 0)
     sample_windows = (
-        [26, 26, 25, 26, 26, 27, 26, 26, 25, 26, 26, 26, 27, 26, 26, 26],
-        [28, 29, 28, 28, 29, 28, 30, 28, 29, 28, 28, 29, 28, 29, 28, 29],
-        [27, 25, 28, 26, 30, 24, 29, 26, 27, 25, 28, 26, 27, 25, 28, 26],
+        [26 + offset for offset in offsets],
+        [28 + offset for offset in offsets],
+        [30 + offset for offset in offsets],
+        [32 + offset for offset in offsets],
+        [34 + offset for offset in offsets],
+        [36 + offset for offset in offsets],
     )
 
     for index, samples in enumerate(sample_windows, start=1):
         measurement = thermometer.process(samples)
-        print(f"Window {index}: ADC={measurement.filtered_adc}, "
-              f"spread={measurement.spread}")
+        print(
+            f"Window {index}: ADC={measurement.filtered_adc}, "
+            f"spread={measurement.spread}, "
+            f"forecast={measurement.forecast_c:.1f}°C"
+        )
         print(lcd_preview(measurement))
         print("-" * 16)
 

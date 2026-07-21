@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/badge/LANGUAGE-Embedded_C-0b1220?style=flat-square&labelColor=0b1220&color=22d3ee" alt="Embedded C"/>
   <img src="https://img.shields.io/badge/DISPLAY-16x2_LCD-0b1220?style=flat-square&labelColor=0b1220&color=2dd4bf" alt="16x2 LCD"/>
   <img src="https://img.shields.io/badge/SMART_FILTER-16_SAMPLES-0b1220?style=flat-square&labelColor=0b1220&color=06b6d4" alt="16-sample smart filter"/>
+  <img src="https://img.shields.io/badge/CGRAM-LIVE_SPARKLINE-0b1220?style=flat-square&labelColor=0b1220&color=14b8a6" alt="Live CGRAM sparkline"/>
 </p>
 
 ## Overview
@@ -38,7 +39,8 @@ flowchart LR
 4. `ALE` and `START` begin a conversion, while `EOC` indicates when conversion is complete.
 5. `OE` enables the ADC output, and the 8-bit result is read through Port 1.
 6. Sixteen readings form one measurement window. The minimum and maximum are rejected, and the remaining 14 readings are averaged.
-7. The firmware converts the filtered ADC result to Celsius, grades signal quality, detects temperature direction, and updates the LCD.
+7. The firmware converts the filtered ADC result to Celsius, grades signal quality, and detects temperature direction.
+8. Each valid window enters a 16-point history used for the auto-ranging LCD graph and bounded 60-second forecast.
 
 ## Smart Measurement Layer
 
@@ -52,13 +54,33 @@ The original project displayed one raw ADC reading. This version adds a distinct
 | **Live trend** | Reports `RISING`, `FALLING`, or `STABLE` compared with the previous valid window |
 | **Sensor protection** | Replaces the reading with `SENSOR FAULT` when the calculated value exceeds the LM35 operating range |
 | **Integer-only conversion** | Avoids floating-point overhead in the embedded firmware |
+| **CGRAM thermal sparkline** | Turns LCD row 2 into a scrolling chart using all eight custom HD44780 characters |
+| **Sub-degree graph history** | Stores tenths of a degree instead of whole degrees, preserving small changes before auto-ranging |
+| **Robust forecast** | Fits a least-squares trend across up to 16 windows instead of amplifying one noisy difference |
+| **Bounded prediction** | Projects 15 windows ahead and limits the forecast change to ±20.0 °C |
 
-Example LCD output:
+### 16x2 thermal dashboard
+
+The first LCD row is designed to fit even at the LM35 upper limit. It contains current temperature, forecast, direction, and quality:
 
 ```text
-TEMP: 26.1°C
-Q:HIGH STABLE
+26.1C>27.4C^H
 ```
+
+- `^`, `v`, or `=` means rising, falling, or stable.
+- `H`, `M`, or `L` means high, medium, or low measurement quality.
+
+The second row uses CGRAM characters 0 through 7 as vertical bar levels. A flat history is deliberately drawn at mid-height, while a changing history is scaled to its own visible minimum and maximum:
+
+```text
+▂▂▃▃▄▄▅▅▅▆▆▇▇▇██
+```
+
+The Python model renders the same graph with Unicode blocks; the physical LCD uses custom 5x8-dot characters. No extra display hardware is required.
+
+### Forecast method
+
+The prediction is based on a linear least-squares slope over the visible history—not only the last two measurements. The nominal timing is one window every four seconds, so 15 projected windows represent approximately one minute. The prediction remains integer-only and is clamped to both the LM35 range and a maximum ±20.0 °C change.
 
 ## Hardware
 
@@ -78,7 +100,7 @@ Q:HIGH STABLE
 | LCD data bus | `P3` | Sends commands and display data |
 | `RS`, `RW`, `EN` | `P2.5`, `P2.6`, `P2.7` | LCD control |
 | `ALE`, `OE`, `START`, `EOC` | `P2.3`, `P2.4`, `P2.1`, `P2.0` | ADC0808 control and status |
-| ADC clock | `P2.2` | Timer 0 generated clock |
+| ADC clock | `P2.2` | Timer 0 generated clock; the same interrupt supplies the measurement-window timebase |
 | `CHC`, `CHB`, `CHA` | `P0.7`, `P0.6`, `P0.5` | ADC channel selection |
 
 ## Temperature Conversion and Calibration
@@ -110,7 +132,8 @@ Calibrate the completed circuit against a trusted thermometer before treating it
 4. Build the project and load the generated HEX file into the MCU in Proteus.
 5. Wire the hardware according to the pin mapping and start the simulation.
 6. Confirm that the ADC reference matches `ADC_VREF_MV` in the source.
-7. Adjust the LM35 input temperature and verify the temperature, quality, and trend fields on the LCD.
+7. Confirm that `OSCILLATOR_HZ` matches the MCU clock so the forecast horizon remains close to 60 seconds.
+8. Adjust the LM35 input temperature and verify the dashboard and scrolling sparkline.
 
 ### Run the desktop reference model
 
@@ -120,7 +143,15 @@ The Python file mirrors the embedded measurement algorithm and can be run withou
 python DigitalThermometer.py
 ```
 
-It processes example 16-sample windows and prints a two-line LCD preview. It is useful for checking filtering, conversion, quality, trend, and fault logic before changing the embedded firmware.
+It processes example 16-sample windows and prints a two-line LCD preview. It is useful for checking filtering, conversion, quality, trend, auto-ranging, forecasting, and fault logic before changing the embedded firmware.
+
+### Run the reference-model tests
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests cover spike rejection, quality and trend thresholds, flat and auto-ranged charts, least-squares forecasting, exact 16-column formatting, and fault recovery.
 
 > A Proteus schematic and compiled HEX file are not currently included in this repository.
 
@@ -128,8 +159,9 @@ It processes example 16-sample windows and prints a two-line LCD preview. It is 
 
 | File | Status |
 | --- | --- |
-| [`DigitalThermometer.c`](./DigitalThermometer.c) | Primary 8051 firmware with smart filtering, quality grading, trend detection, and fault handling |
-| [`DigitalThermometer.py`](./DigitalThermometer.py) | Runnable desktop reference model of the measurement pipeline |
+| [`DigitalThermometer.c`](./DigitalThermometer.c) | Primary 8051 firmware with filtering, CGRAM charting, forecasting, quality grading, and fault handling |
+| [`DigitalThermometer.py`](./DigitalThermometer.py) | Runnable desktop reference model with a matching Unicode sparkline |
+| [`tests/test_thermometer.py`](./tests/test_thermometer.py) | Automated checks for the filtering, chart, forecast, display, and fault logic |
 
 ## Recommended Improvements
 
