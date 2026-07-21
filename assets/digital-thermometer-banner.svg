@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Digital Thermometer</title>
+  <desc id="desc">Professional engineering banner showing the LM35, ADC0808, 8051 microcontroller and LCD signal chain.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050b18"/>
+      <stop offset="0.55" stop-color="#071426"/>
+      <stop offset="1" stop-color="#08243a"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#38bdf8"/>
+      <stop offset="1" stop-color="#2dd4bf"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop offset="0" stop-color="#22d3ee" stop-opacity="0.3"/>
+      <stop offset="1" stop-color="#22d3ee" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" fill="none" stroke="#38bdf8" stroke-opacity="0.055"/>
+    </pattern>
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="360" rx="28" fill="url(#bg)"/>
+  <rect width="1280" height="360" rx="28" fill="url(#grid)"/>
+  <circle cx="1090" cy="150" r="260" fill="url(#glow)"/>
+  <path d="M0 358H1280" stroke="url(#accent)" stroke-width="4"/>
+
+  <g transform="translate(74 68)">
+    <circle cx="8" cy="8" r="8" fill="#22d3ee" filter="url(#softGlow)">
+      <animate attributeName="opacity" values="1;.35;1" dur="2.4s" repeatCount="indefinite"/>
+    </circle>
+    <text x="34" y="15" fill="#7dd3fc" font-family="Arial, Helvetica, sans-serif" font-size="17" font-weight="700" letter-spacing="4">EMBEDDED MEASUREMENT SYSTEM</text>
+    <text x="0" y="105" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="1">DIGITAL THERMOMETER</text>
+    <rect x="2" y="126" width="84" height="4" rx="2" fill="url(#accent)"/>
+    <text x="0" y="174" fill="#cbd5e1" font-family="Arial, Helvetica, sans-serif" font-size="25">8051 · LM35 · ADC0808 · 16×2 LCD</text>
+    <text x="0" y="216" fill="#7890ad" font-family="Arial, Helvetica, sans-serif" font-size="16" font-weight="600" letter-spacing="2">SENSOR ACQUISITION  /  ADC CONTROL  /  REAL-TIME DISPLAY</text>
+  </g>
+
+  <g transform="translate(880 58)">
+    <rect x="0" y="0" width="314" height="238" rx="22" fill="#07101e" stroke="#164e63" stroke-width="2"/>
+    <rect x="24" y="24" width="266" height="94" rx="12" fill="#061a27" stroke="#0e7490"/>
+    <text x="45" y="58" fill="#6092a8" font-family="Arial, Helvetica, sans-serif" font-size="13" font-weight="700" letter-spacing="3">TEMPERATURE</text>
+    <text x="43" y="103" fill="#67e8f9" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="45" font-weight="700" filter="url(#softGlow)">26.4 °C</text>
+
+    <g transform="translate(20 151)" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700">
+      <rect width="50" height="34" rx="7" fill="#0c2535" stroke="#0e7490"/><text x="11" y="22" fill="#7dd3fc">LM35</text>
+      <path d="M54 17H68" stroke="#22d3ee" stroke-width="2"/>
+      <circle cx="61" cy="17" r="3" fill="#2dd4bf"><animate attributeName="cx" values="56;66;56" dur="1.8s" repeatCount="indefinite"/></circle>
+      <rect x="72" width="66" height="34" rx="7" fill="#0c2535" stroke="#0e7490"/><text x="81" y="22" fill="#7dd3fc">ADC0808</text>
+      <path d="M142 17H156" stroke="#22d3ee" stroke-width="2"/>
+      <rect x="160" width="50" height="34" rx="7" fill="#0c2535" stroke="#0e7490"/><text x="171" y="22" fill="#7dd3fc">8051</text>
+      <path d="M214 17H228" stroke="#2dd4bf" stroke-width="2"/>
+      <rect x="232" width="42" height="34" rx="7" fill="#0c2535" stroke="#14b8a6"/><text x="243" y="22" fill="#5eead4">LCD</text>
+    </g>
+
+    <text x="24" y="218" fill="#52677e" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" letter-spacing="2">ANALOG  →  DIGITAL  →  DISPLAY</text>
+  </g>
+</svg>
