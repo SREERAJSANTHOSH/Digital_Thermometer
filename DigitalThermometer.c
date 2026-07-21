@@ -24,13 +24,14 @@ sbit ADC_CH_A  = P0^5;
  */
 #define ADC_VREF_MV                    2560UL
 #define OSCILLATOR_HZ              11059200UL
-#define TIMER0_RELOAD                   0xC2U
+#define TIMER0_RELOAD                   0xD4U
 #define MEASUREMENT_WINDOW_SECONDS          4U
+#define TICK_PRESCALER                      8U
 #define TIMER0_OVERFLOWS_PER_SECOND \
     (OSCILLATOR_HZ / 12UL / (256UL - TIMER0_RELOAD))
 #define MEASUREMENT_WINDOW_TICKS \
     ((unsigned int)(TIMER0_OVERFLOWS_PER_SECOND * \
-                    MEASUREMENT_WINDOW_SECONDS))
+                    MEASUREMENT_WINDOW_SECONDS / TICK_PRESCALER))
 
 /* Smart measurement configuration. */
 #define SAMPLE_COUNT                       16U
@@ -43,6 +44,13 @@ sbit ADC_CH_A  = P0^5;
 #define MIN_FORECAST_POINTS                 4U
 #define FORECAST_HORIZON_WINDOWS           15L
 #define MAX_FORECAST_CHANGE_X10            200L
+
+/* Time-to-threshold, contact detection, and dead-reckoning configuration. */
+#define ALERT_THRESHOLD_X10               370U
+#define ETA_INVALID                    0xFFFFU
+#define MAX_ETA_SECONDS                  5940U
+#define CONTACT_RISE_X10                   15U
+#define DEAD_RECKON_WINDOWS                 5U
 
 #define TREND_STABLE                        0U
 #define TREND_RISING                        1U
@@ -65,8 +73,14 @@ unsigned char code bar_glyphs[8][8] = {
 };
 
 volatile unsigned int timer0_ticks = 0U;
+unsigned char data isr_prescale = 0U;
 unsigned int temperature_history[SPARK_LENGTH];
 unsigned char history_count = 0U;
+
+/* Fitted least-squares slope, cached for ETA and fault-time estimation. */
+signed long slope_numerator = 0L;
+signed long slope_denominator = 1L;
+bit slope_valid = 0;
 
 void delay(unsigned int ticks);
 void lcd_init(void);
@@ -76,12 +90,17 @@ void lcd_print(const char *text);
 void lcd_clear_line(unsigned char address);
 void lcd_load_bar_glyphs(void);
 void lcd_print_unsigned(unsigned int value);
+void lcd_print_two_digits(unsigned int value);
 void lcd_print_temperature(unsigned int temperature_x10);
 void lcd_show_dashboard(unsigned int temperature_x10,
                         unsigned int forecast_x10,
                         unsigned char quality,
-                        unsigned char trend);
+                        unsigned char trend,
+                        unsigned char contact);
+void lcd_show_eta_page(unsigned int eta_seconds);
 void lcd_show_fault(void);
+void lcd_show_fault_with_estimate(unsigned int estimate_x10,
+                                  unsigned char windows_remaining);
 
 void adc_init(void);
 unsigned char adc_read_channel_zero(void);
@@ -94,15 +113,29 @@ unsigned char classify_trend(unsigned int current_x10,
 void history_reset(void);
 void history_push(unsigned int temperature_x10);
 unsigned int forecast_temperature_x10(void);
+unsigned int eta_to_threshold_seconds(unsigned int current_x10);
+unsigned char detect_contact(void);
+unsigned int dead_reckon_estimate_x10(unsigned int last_valid_x10,
+                                      unsigned char windows_elapsed);
 void sparkline_render(void);
 unsigned int timer0_snapshot(void);
 void wait_for_next_measurement_window(void);
 
-/* Timer 0 supplies the ADC clock and the measurement-window timebase. */
+/*
+ * Timer 0 supplies an approximately 10.5 kHz ADC clock and the measurement
+ * timebase. Only every eighth overflow touches the 16-bit tick counter,
+ * reducing ISR cost while preserving the four-second window.
+ */
 void timer0_isr(void) interrupt 1
 {
     ADC_CLK = !ADC_CLK;
-    timer0_ticks++;
+    isr_prescale++;
+
+    if (isr_prescale >= TICK_PRESCALER)
+    {
+        isr_prescale = 0U;
+        timer0_ticks++;
+    }
 }
 
 void main(void)
@@ -111,10 +144,17 @@ void main(void)
     unsigned char sample_spread;
     unsigned char quality;
     unsigned char trend;
+    unsigned char contact;
+    unsigned char fault_windows = 0U;
     unsigned int temperature_x10;
     unsigned int forecast_x10;
+    unsigned int eta_seconds;
+    unsigned int estimate_x10;
     unsigned int previous_temperature_x10 = 0U;
+    unsigned int last_valid_temperature_x10 = 0U;
     bit have_previous_measurement = 0;
+    bit have_last_valid = 0;
+    bit page_toggle = 0;
 
     lcd_init();
     lcd_load_bar_glyphs();
@@ -135,12 +175,34 @@ void main(void)
 
         if (temperature_x10 > MAX_VALID_TEMP_X10)
         {
-            lcd_show_fault();
+            if (fault_windows < 255U)
+            {
+                fault_windows++;
+            }
+
+            if (have_last_valid && slope_valid &&
+                fault_windows <= DEAD_RECKON_WINDOWS)
+            {
+                estimate_x10 = dead_reckon_estimate_x10(
+                    last_valid_temperature_x10, fault_windows);
+                lcd_show_fault_with_estimate(
+                    estimate_x10,
+                    (unsigned char)(DEAD_RECKON_WINDOWS - fault_windows));
+            }
+            else
+            {
+                lcd_show_fault();
+            }
+
+            /* Keep the cached slope for bounded fault-time estimation. */
             history_reset();
             have_previous_measurement = 0;
+            page_toggle = 0;
         }
         else
         {
+            fault_windows = 0U;
+
             if (have_previous_measurement)
             {
                 trend = classify_trend(temperature_x10,
@@ -153,12 +215,35 @@ void main(void)
             }
 
             history_push(temperature_x10);
+            contact = detect_contact();
             forecast_x10 = forecast_temperature_x10();
-            lcd_show_dashboard(temperature_x10,
-                               forecast_x10,
-                               quality,
-                               trend);
+            eta_seconds = eta_to_threshold_seconds(temperature_x10);
+
+            if (eta_seconds != ETA_INVALID)
+            {
+                page_toggle = !page_toggle;
+            }
+            else
+            {
+                page_toggle = 0;
+            }
+
+            if ((eta_seconds != ETA_INVALID) && page_toggle)
+            {
+                lcd_show_eta_page(eta_seconds);
+            }
+            else
+            {
+                lcd_show_dashboard(temperature_x10,
+                                   forecast_x10,
+                                   quality,
+                                   trend,
+                                   contact);
+            }
+
             previous_temperature_x10 = temperature_x10;
+            last_valid_temperature_x10 = temperature_x10;
+            have_last_valid = 1;
         }
 
         wait_for_next_measurement_window();
@@ -310,6 +395,9 @@ void history_push(unsigned int temperature_x10)
  * slope by 15 projects approximately 60 seconds ahead for 4-second windows.
  * The projected change is capped at +/-20.0 C to suppress absurd forecasts
  * after a transient or sensor disturbance.
+ *
+ * The fitted slope is retained for the threshold ETA and for a short,
+ * explicitly labelled estimate if the sensor becomes invalid.
  */
 unsigned int forecast_temperature_x10(void)
 {
@@ -326,11 +414,13 @@ unsigned int forecast_temperature_x10(void)
 
     if (history_count == 0U)
     {
+        slope_valid = 0;
         return 0U;
     }
 
     if (history_count < MIN_FORECAST_POINTS)
     {
+        slope_valid = 0;
         return temperature_history[history_count - 1U];
     }
 
@@ -350,8 +440,13 @@ unsigned int forecast_temperature_x10(void)
 
     if (denominator == 0L)
     {
+        slope_valid = 0;
         return temperature_history[history_count - 1U];
     }
+
+    slope_numerator = numerator;
+    slope_denominator = denominator;
+    slope_valid = 1;
 
     projected_change = (numerator * FORECAST_HORIZON_WINDOWS) /
                        denominator;
@@ -378,6 +473,89 @@ unsigned int forecast_temperature_x10(void)
     }
 
     return (unsigned int)predicted;
+}
+
+/*
+ * Return the time until the fitted trend reaches ALERT_THRESHOLD_X10.
+ * The division rounds up so the display never claims the threshold will be
+ * reached earlier than the fitted line predicts.
+ */
+unsigned int eta_to_threshold_seconds(unsigned int current_x10)
+{
+    signed long gap;
+    signed long scaled_gap;
+    signed long scaled_slope;
+    unsigned long distance;
+    unsigned long rate;
+    unsigned long windows;
+
+    if (!slope_valid || slope_numerator == 0L)
+    {
+        return ETA_INVALID;
+    }
+
+    gap = (signed long)ALERT_THRESHOLD_X10 - (signed long)current_x10;
+
+    if (gap == 0L || ((gap > 0L) != (slope_numerator > 0L)))
+    {
+        return ETA_INVALID;
+    }
+
+    scaled_gap = gap * slope_denominator;
+    scaled_slope = slope_numerator;
+    distance = (unsigned long)((scaled_gap < 0L) ?
+                               -scaled_gap : scaled_gap);
+    rate = (unsigned long)((scaled_slope < 0L) ?
+                           -scaled_slope : scaled_slope);
+    windows = (distance + rate - 1UL) / rate;
+
+    if (windows == 0UL ||
+        windows > (unsigned long)(MAX_ETA_SECONDS /
+                                  MEASUREMENT_WINDOW_SECONDS))
+    {
+        return ETA_INVALID;
+    }
+
+    return (unsigned int)(windows * MEASUREMENT_WINDOW_SECONDS);
+}
+
+/* A rise of at least 1.5 C across two windows indicates likely contact. */
+unsigned char detect_contact(void)
+{
+    if (history_count < 3U)
+    {
+        return 0U;
+    }
+
+    if (temperature_history[history_count - 1U] >=
+        (temperature_history[history_count - 3U] + CONTACT_RISE_X10))
+    {
+        return 1U;
+    }
+
+    return 0U;
+}
+
+/* Extrapolate from the final valid reading using the cached fitted slope. */
+unsigned int dead_reckon_estimate_x10(unsigned int last_valid_x10,
+                                      unsigned char windows_elapsed)
+{
+    signed long estimate;
+
+    estimate = (signed long)last_valid_x10 +
+               ((slope_numerator * (signed long)windows_elapsed) /
+                slope_denominator);
+
+    if (estimate < 0L)
+    {
+        estimate = 0L;
+    }
+    else if (estimate > (signed long)MAX_VALID_TEMP_X10)
+    {
+        estimate = (signed long)MAX_VALID_TEMP_X10;
+    }
+
+    return (unsigned int)estimate;
 }
 
 /* Render a right-aligned, auto-ranging 16-column thermal sparkline. */
@@ -556,6 +734,12 @@ void lcd_print_unsigned(unsigned int value)
     lcd_data((unsigned char)('0' + (value % 10U)));
 }
 
+void lcd_print_two_digits(unsigned int value)
+{
+    lcd_data((unsigned char)('0' + ((value / 10U) % 10U)));
+    lcd_data((unsigned char)('0' + (value % 10U)));
+}
+
 void lcd_print_temperature(unsigned int temperature_x10)
 {
     lcd_print_unsigned(temperature_x10 / 10U);
@@ -566,20 +750,25 @@ void lcd_print_temperature(unsigned int temperature_x10)
 
 /*
  * Maximum-width example (15 characters): 150.0C>150.0C^H
- * ^, v, and = are ROM characters; all eight CGRAM slots remain available
- * for the bar graph. H/M/L is the measurement-quality grade.
+ * ^, v, =, and ! are ROM characters; all eight CGRAM slots remain available
+ * for the bar graph. ! indicates likely contact with the sensor.
  */
 void lcd_show_dashboard(unsigned int temperature_x10,
                         unsigned int forecast_x10,
                         unsigned char quality,
-                        unsigned char trend)
+                        unsigned char trend,
+                        unsigned char contact)
 {
     lcd_clear_line(0x80);
     lcd_print_temperature(temperature_x10);
     lcd_data('>');
     lcd_print_temperature(forecast_x10);
 
-    if (trend == TREND_RISING)
+    if (contact != 0U)
+    {
+        lcd_data('!');
+    }
+    else if (trend == TREND_RISING)
     {
         lcd_data('^');
     }
@@ -608,12 +797,39 @@ void lcd_show_dashboard(unsigned int temperature_x10,
     sparkline_render();
 }
 
+/* Time-to-threshold page, for example: "37.0C IN 02:30". */
+void lcd_show_eta_page(unsigned int eta_seconds)
+{
+    lcd_clear_line(0x80);
+    lcd_print_temperature(ALERT_THRESHOLD_X10);
+    lcd_print(" IN ");
+    lcd_print_two_digits(eta_seconds / 60U);
+    lcd_data(':');
+    lcd_print_two_digits(eta_seconds % 60U);
+
+    sparkline_render();
+}
+
 void lcd_show_fault(void)
 {
     lcd_clear_line(0x80);
     lcd_print(" SENSOR FAULT");
     lcd_clear_line(0xC0);
     lcd_print(" CHECK LM35/ADC");
+}
+
+/* Fault page with a bounded estimate, for example: "EST 26.7C (3)". */
+void lcd_show_fault_with_estimate(unsigned int estimate_x10,
+                                  unsigned char windows_remaining)
+{
+    lcd_clear_line(0x80);
+    lcd_print(" SENSOR FAULT");
+    lcd_clear_line(0xC0);
+    lcd_print("EST ");
+    lcd_print_temperature(estimate_x10);
+    lcd_print(" (");
+    lcd_data((unsigned char)('0' + windows_remaining));
+    lcd_data(')');
 }
 
 void delay(unsigned int ticks)
