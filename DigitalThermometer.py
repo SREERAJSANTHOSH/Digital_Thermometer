@@ -1,161 +1,151 @@
-import time
+"""Reference model for the 8051 digital thermometer's smart measurement layer.
 
-RS = 5
-RW = 6
-EN = 7
-ale = 3
-oe = 4
-start = 1
-eoc = 0
-clk = 2
-chc = 7
-chb = 6
-cha = 5
+This module does not access 8051 hardware registers. It mirrors the filtering,
+conversion, quality grading, trend detection, and range checks used by the C
+firmware so the measurement logic can be exercised on a normal computer.
+"""
 
-def delay(t):
-    time.sleep(t)
+from __future__ import annotations
 
-def lcd_init():
-    lcd_command(0x38)
-    lcd_command(0x01)
-    lcd_command(0x0f)
-    lcd_command(0x06)
-    lcd_command(0x0c)
-    lcd_command(0x80)
+from dataclasses import dataclass
+from enum import Enum
+from typing import Iterable, Sequence
 
-def lcd_command(c):
-    pass
 
-def lcd_data(d):
-    pass
+ADC_VREF_MV = 2560
+SAMPLE_COUNT = 16
+TREND_THRESHOLD_TENTHS_C = 10
+MAX_VALID_TENTHS_C = 1500
 
-def str(a):
-    for j in range(len(a)):
-        lcd_data(a[j])
 
-def print(p):
-    pass
+class Quality(str, Enum):
+    HIGH = "HIGH"
+    MEDIUM = "MED"
+    LOW = "LOW"
 
-k = 0
-q = 0
-r = 0
-x = 0
-y = 0
-z = 0
 
-def timer0():
-    clk = not clk
+class Trend(str, Enum):
+    STABLE = "STABLE"
+    RISING = "RISING"
+    FALLING = "FALLING"
 
-lcd_init()
-str("DIGITALTHERMOMETER")
-lcd_command(0x01)
-str("Temp:")
-lcd_command(96)
-lcd_data(0x10)
-lcd_data(0x07)
-lcd_data(0x08)
-lcd_data(0x08)
-lcd_data(0x08)
-lcd_data(0x08)
-lcd_data(0x07)
-lcd_command(0x8b)
-lcd_data(4)
-eoc = 1
-ale = 0
-oe = 0
-start = 0
-TMOD = 0x02
-TH0 = 0xc2
-IE = 0x82
-TR0 = 1
 
-while True:
-    chc = 0
-    chb = 0
-    cha = 0
-    ale = 1
-    start = 1
-    delay(1)
-    ale = 0
-    start = 0
-    while eoc == 1:
-        pass
-    while eoc == 0:
-        pass
-    oe = 1
-    k = P1
-    lcd_command(0x85)
-    print(k)
-    oe = 0
-k = P1
-lcd_command(0x85)
-print(k)
-oe = 0
+@dataclass(frozen=True)
+class Measurement:
+    filtered_adc: int
+    spread: int
+    temperature_tenths_c: int
+    quality: Quality
+    trend: Trend
+    sensor_fault: bool
 
-def str(a):
-    j = 0
-    while a[j] != '\0':
-        lcd_data(a[j])
-        j += 1
+    @property
+    def temperature_c(self) -> float:
+        return self.temperature_tenths_c / 10
 
-def lcd_init():
-    lcd_command(0x38)
-    lcd_command(0x01)
-    lcd_command(0x0f)
-    lcd_command(0x06)
-    lcd_command(0x0c)
-    lcd_command(0x80)
 
-def lcd_command(c):
-    P3 = c
-    RS = 0
-    RW = 0
-    EN = 1
-    delay(5)
-    EN = 0
-    delay(5)
+def trimmed_mean(samples: Sequence[int]) -> tuple[int, int]:
+    """Return a rounded mean after rejecting one minimum and one maximum."""
+    if len(samples) != SAMPLE_COUNT:
+        raise ValueError(f"exactly {SAMPLE_COUNT} ADC samples are required")
 
-def lcd_data(d):
-    P3 = d
-    RS = 1
-    RW = 0
-    EN = 1
-    delay(5)
-    EN = 0
-    delay(5)
+    if any(sample < 0 or sample > 255 for sample in samples):
+        raise ValueError("ADC samples must be in the range 0..255")
 
-def delay(t):
-    j = 0
-    while j < t * 400:
-        j += 1
+    minimum = min(samples)
+    maximum = max(samples)
+    trimmed_sum = sum(samples) - minimum - maximum
+    trimmed_count = len(samples) - 2
+    filtered_adc = (trimmed_sum + trimmed_count // 2) // trimmed_count
+    return filtered_adc, maximum - minimum
 
-def print(p):
-    x = p * 10
-    if x >= 1000:
-        q = x / 1000
-        q = q + 48
-        y = (x % 1000) / 100
-        y = y + 48
-        z = ((x % 1000) % 100) / 10
-        z = z + 48
-        r = x % 10
-        r = r + 48
-        lcd_data(q)
-        lcd_data(y)
-        lcd_data(z)
-        lcd_data(46)
-        lcd_data(r)
-    else:
-        q = x / 100
-        q = q + 48
-        y = (x % 100) / 10
-        y = y + 48
-        z = x % 10
-        z = z + 48
-        lcd_data(q)
-        lcd_data(y)
-        lcd_data(46)
-        lcd_data(z)
-        r = 0
-        lcd_data(r)
+
+def adc_to_tenths_c(adc_count: int, vref_mv: int = ADC_VREF_MV) -> int:
+    """Convert an ADC0808 count to 0.1 °C units for an LM35 sensor."""
+    if not 0 <= adc_count <= 255:
+        raise ValueError("ADC count must be in the range 0..255")
+    if vref_mv <= 0:
+        raise ValueError("ADC reference voltage must be positive")
+
+    # LM35 sensitivity is 10 mV/°C, so 1 mV equals 0.1 °C.
+    return (adc_count * vref_mv + 127) // 255
+
+
+def classify_quality(spread: int) -> Quality:
+    if spread <= 1:
+        return Quality.HIGH
+    if spread <= 3:
+        return Quality.MEDIUM
+    return Quality.LOW
+
+
+def classify_trend(current: int, previous: int | None) -> Trend:
+    if previous is None:
+        return Trend.STABLE
+    if current > previous + TREND_THRESHOLD_TENTHS_C:
+        return Trend.RISING
+    if previous > current + TREND_THRESHOLD_TENTHS_C:
+        return Trend.FALLING
+    return Trend.STABLE
+
+
+class SmartThermometer:
+    """Stateful reference implementation of the embedded measurement pipeline."""
+
+    def __init__(self, vref_mv: int = ADC_VREF_MV) -> None:
+        if vref_mv <= 0:
+            raise ValueError("ADC reference voltage must be positive")
+        self.vref_mv = vref_mv
+        self._previous_temperature: int | None = None
+
+    def process(self, samples: Iterable[int]) -> Measurement:
+        sample_window = tuple(samples)
+        filtered_adc, spread = trimmed_mean(sample_window)
+        temperature = adc_to_tenths_c(filtered_adc, self.vref_mv)
+        fault = temperature > MAX_VALID_TENTHS_C
+        trend = classify_trend(temperature, self._previous_temperature)
+
+        if fault:
+            self._previous_temperature = None
+        else:
+            self._previous_temperature = temperature
+
+        return Measurement(
+            filtered_adc=filtered_adc,
+            spread=spread,
+            temperature_tenths_c=temperature,
+            quality=classify_quality(spread),
+            trend=trend,
+            sensor_fault=fault,
+        )
+
+
+def lcd_preview(measurement: Measurement) -> str:
+    """Return a two-line text preview matching the 16x2 LCD presentation."""
+    if measurement.sensor_fault:
+        return " SENSOR FAULT   \n CHECK LM35/ADC "
+
+    first = f"TEMP: {measurement.temperature_c:.1f}°C"
+    second = f"Q:{measurement.quality.value:<5}{measurement.trend.value}"
+    return f"{first[:16]:<16}\n{second[:16]:<16}"
+
+
+def main() -> None:
+    thermometer = SmartThermometer()
+    sample_windows = (
+        [26, 26, 25, 26, 26, 27, 26, 26, 25, 26, 26, 26, 27, 26, 26, 26],
+        [28, 29, 28, 28, 29, 28, 30, 28, 29, 28, 28, 29, 28, 29, 28, 29],
+        [27, 25, 28, 26, 30, 24, 29, 26, 27, 25, 28, 26, 27, 25, 28, 26],
+    )
+
+    for index, samples in enumerate(sample_windows, start=1):
+        measurement = thermometer.process(samples)
+        print(f"Window {index}: ADC={measurement.filtered_adc}, "
+              f"spread={measurement.spread}")
+        print(lcd_preview(measurement))
+        print("-" * 16)
+
+
+if __name__ == "__main__":
+    main()
 
