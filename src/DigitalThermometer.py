@@ -9,10 +9,9 @@ during sensor faults. It does not access 8051 hardware registers.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Sequence
-
 
 ADC_VREF_MV = 2560
 SAMPLE_COUNT = 16
