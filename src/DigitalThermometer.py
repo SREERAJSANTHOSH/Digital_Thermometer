@@ -231,10 +231,7 @@ def render_sparkline(history: Sequence[int], width: int = SPARK_LENGTH) -> str:
     if span == 0:
         chart = BLOCKS[3] * len(visible)
     else:
-        levels = [
-            ((value - minimum) * 7 + span // 2) // span
-            for value in visible
-        ]
+        levels = [((value - minimum) * 7 + span // 2) // span for value in visible]
         chart = "".join(BLOCKS[level] for level in levels)
 
     return chart.rjust(width)
@@ -341,10 +338,7 @@ def lcd_preview(measurement: Measurement) -> str:
     if measurement.show_eta_page and measurement.eta_seconds is not None:
         minutes = measurement.eta_seconds // 60
         seconds = measurement.eta_seconds % 60
-        first = (
-            f"{ALERT_THRESHOLD_TENTHS_C / 10:.1f}C IN "
-            f"{minutes:02d}:{seconds:02d}"
-        )
+        first = f"{ALERT_THRESHOLD_TENTHS_C / 10:.1f}C IN {minutes:02d}:{seconds:02d}"
         return f"{first[:16]:<16}\n{measurement.sparkline[:16]:<16}"
 
     if measurement.contact:
@@ -372,9 +366,7 @@ def main() -> None:
     thermometer = SmartThermometer()
     offsets = (0, 0, -1, 0, 1, 0, 0, -1, 0, 1, 0, 0, -1, 0, 1, 0)
     centers = (26, 28, 30, 32, 34, 36)
-    sample_windows = [
-        [center + offset for offset in offsets] for center in centers
-    ]
+    sample_windows = [[center + offset for offset in offsets] for center in centers]
     sample_windows.extend(
         (
             [200] * SAMPLE_COUNT,

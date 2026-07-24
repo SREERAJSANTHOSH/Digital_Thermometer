@@ -66,19 +66,13 @@ class EtaTests(unittest.TestCase):
         )
 
     def test_eta_none_when_trend_points_away(self):
-        self.assertIsNone(
-            eta_to_threshold_seconds([300, 290, 280, 270])
-        )
+        self.assertIsNone(eta_to_threshold_seconds([300, 290, 280, 270]))
 
     def test_eta_none_at_threshold(self):
-        self.assertIsNone(
-            eta_to_threshold_seconds([340, 350, 360, 370])
-        )
+        self.assertIsNone(eta_to_threshold_seconds([340, 350, 360, 370]))
 
     def test_eta_none_with_flat_history(self):
-        self.assertIsNone(
-            eta_to_threshold_seconds([260, 260, 260, 260])
-        )
+        self.assertIsNone(eta_to_threshold_seconds([260, 260, 260, 260]))
 
     def test_eta_none_when_beyond_display_limit(self):
         history = [100] * 15 + [101]
@@ -188,10 +182,7 @@ class DisplayTests(unittest.TestCase):
 
         self.assertIsNotNone(measurement)
         self.assertTrue(
-            all(
-                len(line) == 16
-                for line in lcd_preview(measurement).splitlines()
-            )
+            all(len(line) == 16 for line in lcd_preview(measurement).splitlines())
         )
 
     def test_contact_symbol_overrides_trend(self):
