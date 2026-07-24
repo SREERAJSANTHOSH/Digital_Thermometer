@@ -1,6 +1,6 @@
 import unittest
 
-from DigitalThermometer import (
+from src.DigitalThermometer import (
     Quality,
     SmartThermometer,
     Trend,

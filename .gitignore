@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+dist/
+build/
+*.egg-info/
+.eggs/
+*.egg
+.pytest_cache/
+htmlcov/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Keil C51
+Objects/
+Listings/
+*.hex
+*.obj
+*.lst
+*.map
+*.lnp
+*.crf
+*.o
+*.axf
+*.htm
+*.dep
+*.uvguix.*
+
+# Proteus
+*.pdsprj.bak
+Last Loaded*.pdsprj
+*.pdsprj.DESKTOP-*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
